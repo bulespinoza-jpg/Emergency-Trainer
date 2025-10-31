@@ -6,21 +6,21 @@
 <title>Emergency Trainer</title>
 <link rel="manifest" href="manifest.json">
 <style>
-body{font-family:Arial;text-align:center;background:#111;color:#eee;padding:18px;}
-h1{color:#ffcc00}
-button{margin:8px;padding:10px 18px;border-radius:6px;border:none;cursor:pointer}
-.start{background:#28a745;color:#000} .pause{background:#dc3545;color:#fff} .test{background:#007bff;color:#fff}
-input[type=number]{width:50px;padding:4px}
-textarea{width:320px;height:120px;padding:6px;margin-top:8px}
-#timerDisplay{margin-top:12px;color:#7CFC00}
-#log{margin-top:12px;background:#222;padding:8px;border-radius:6px;max-height:200px;overflow:auto;text-align:left;font-family:monospace;display:none}
-#emergencyPopup{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#300;padding:18px;border-radius:10px;z-index:9999;box-shadow:0 0 20px #900;color:#fff}
-#silenceBtn{margin-top:12px;padding:8px 14px;background:#ff0;border:none;border-radius:6px;cursor:pointer}
-.controls{margin-bottom:10px}
+  body{font-family:Arial;text-align:center;background:#111;color:#eee;padding:18px;}
+  h1{color:#ffcc00}
+  button{margin:8px;padding:10px 18px;border-radius:6px;border:none;cursor:pointer}
+  .start{background:#28a745;color:#000} .pause{background:#dc3545;color:#fff} .test{background:#007bff;color:#fff}
+  input[type=number]{width:50px;padding:4px}
+  textarea{width:320px;height:120px;padding:6px;margin-top:8px}
+  #timerDisplay{margin-top:12px;color:#7CFC00}
+  #log{margin-top:12px;background:#222;padding:8px;border-radius:6px;max-height:200px;overflow:auto;text-align:left;font-family:monospace;display:none}
+  #emergencyPopup{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#300;padding:18px;border-radius:10px;z-index:9999;box-shadow:0 0 20px #900;color:#fff}
+  #silenceBtn{margin-top:12px;padding:8px 14px;background:#ff0;border:none;border-radius:6px;cursor:pointer}
+  .controls{margin-bottom:10px}
 </style>
 </head>
 <body>
-<h1>🚨 Emergency Trainer</h1>
+<h1>🚨Emergency Trainer🚨</h1>
 
 <div class="controls">
   <button id="startBtn" class="start">Start Simulation</button>
@@ -57,8 +57,74 @@ textarea{width:320px;height:120px;padding:6px;margin-top:8px}
 </audio>
 
 <script>
-// Código JavaScript igual que tu V7 con audio en loop y timer dinámico
-// (Puedes pegar aquí todo el script de la versión V7 con el audio loop)
+const defaultEmergencies = [
+  "FCU failure","Flameout >50%","Flameout <50%","Engine failure",
+  "Generator failure","Engine fire","Electric fire","Avionics failure",
+  "Brakes failure","Fuel leak","Chip detector","Low oil pressure",
+  "STBY power inop","Door open","Flap failure","AP failure","GPS failure"
+];
+
+const startBtn=document.getElementById('startBtn'),
+pauseBtn=document.getElementById('pauseBtn'),
+testBtn=document.getElementById('testBtn'),
+minTimeInput=document.getElementById('minTime'),
+maxTimeInput=document.getElementById('maxTime'),
+customFailuresInput=document.getElementById('customFailures'),
+showTimerCheckbox=document.getElementById('showTimer'),
+showLogCheckbox=document.getElementById('showLog'),
+timerDisplay=document.getElementById('timerDisplay'),
+logDiv=document.getElementById('log'),
+popup=document.getElementById('emergencyPopup'),
+emergencyNameEl=document.getElementById('emergencyName'),
+emergencyElapsedEl=document.getElementById('emergencyElapsed'),
+silenceBtnEl=document.getElementById('silenceBtn'),
+alarm=document.getElementById('alarmSound');
+
+let simulationActive=false, nextEmergencyIn=0, timeoutId=null, countdownInterval=null, emergencyElapsed=0, emergencyElapsedInterval=null, alarmLoopInterval=null, audioUnlocked=false;
+
+function getEmergencies(){const text=customFailuresInput.value.trim();return text?text.split('\n').map(s=>s.trim()).filter(Boolean):defaultEmergencies.slice();}
+function log(msg){const t=new Date().toLocaleTimeString();logDiv.innerHTML+=`[${t}] ${msg}<br>`;logDiv.scrollTop=logDiv.scrollHeight;}
+
+function playAlarmLoop(){if(!audioUnlocked) return;alarm.currentTime=0;alarm.play().catch(()=>{});clearInterval(alarmLoopInterval);const dur=(alarm.duration&&!isNaN(alarm.duration))?alarm.duration*1000:2500;alarmLoopInterval=setInterval(()=>{alarm.currentTime=0;alarm.play().catch(()=>{});},Math.max(500,dur));}
+function stopAlarmLoop(){clearInterval(alarmLoopInterval);alarm.pause();alarm.currentTime=0;}
+
+async function notifySystem(emergency){
+  const title=`🚨 ${emergency}`;
+  const options={body:'Check your instruments!',icon:'/icon-192.png'};
+  try{const reg=navigator.serviceWorker&&await navigator.serviceWorker.getRegistration();if(reg&&reg.showNotification){reg.showNotification(title,options);return;}}catch(err){console.warn('SW notify failed',err);}
+  if(window.Notification&&Notification.permission==='granted'){new Notification(title,options);} else if(window.Notification&&Notification.permission!=='denied'){Notification.requestPermission().then(p=>{if(p==='granted') new Notification(title,options);});}
+}
+
+function showEmergency(){
+  const list=getEmergencies();if(list.length===0) return;
+  const emergency=list[Math.floor(Math.random()*list.length)];
+  emergencyNameEl.textContent=emergency;popup.style.display='block';emergencyElapsed=0;emergencyElapsedEl.textContent='Active: 0s';
+  clearInterval(emergencyElapsedInterval);
+  emergencyElapsedInterval=setInterval(()=>{emergencyElapsed++;emergencyElapsedEl.textContent=`Active: ${emergencyElapsed}s`;},1000);
+  playAlarmLoop();log(`Emergency triggered: ${emergency}`);notifySystem(emergency);
+}
+
+function scheduleNext(){let minM=parseInt(minTimeInput.value)||3,maxM=parseInt(maxTimeInput.value)||30;if(maxM<minM) maxM=minM;const randMin=Math.floor(Math.random()*(maxM-minM+1)+minM);nextEmergencyIn=randMin*60;if(showTimerCheckbox.checked) timerDisplay.style.display='block';log(`Next emergency in ${Math.floor(nextEmergencyIn/60)}m ${nextEmergencyIn%60}s`);updateTimerDisplay();clearInterval(countdownInterval);countdownInterval=setInterval(()=>{nextEmergencyIn--;updateTimerDisplay();if(nextEmergencyIn<=0) clearInterval(countdownInterval);},1000);clearTimeout(timeoutId);timeoutId=setTimeout(()=>{showEmergency();},nextEmergencyIn*1000);}
+
+function updateTimerDisplay(){if(showTimerCheckbox.checked){timerDisplay.style.display='block';const m=Math.floor(nextEmergencyIn/60);const s=nextEmergencyIn%60;timerDisplay.textContent=`Next emergency in: ${m}m ${s}s`; } else timerDisplay.style.display='none';}
+
+startBtn.addEventListener('click',async ()=>{
+  if(simulationActive) return;
+  simulationActive=true;audioUnlocked=true;try{await alarm.play();alarm.pause();alarm.currentTime=0}catch(e){};if(showLogCheckbox.checked) logDiv.style.display='block';log('Simulation started');scheduleNext();
+});
+
+pauseBtn.addEventListener('click',()=>{
+  simulationActive=false;clearTimeout(timeoutId);clearInterval(countdownInterval);clearInterval(emergencyElapsedInterval);stopAlarmLoop();popup.style.display='none';log('Simulation paused');
+});
+
+testBtn.addEventListener('click',()=>{audioUnlocked=true;showEmergency();});
+silenceBtnEl.addEventListener('click',()=>{stopAlarmLoop();popup.style.display='none';clearInterval(emergencyElapsedInterval);if(simulationActive)scheduleNext();});
+showTimerCheckbox.addEventListener('change',updateTimerDisplay);
+showLogCheckbox.addEventListener('change',e=>{logDiv.style.display=e.target.checked?'block':'none';});
+
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').then(reg=>console.log('SW registered',reg)).catch(err=>console.warn('SW reg failed',err));}
+if('Notification' in window && Notification.permission!=='granted' && Notification.permission!=='denied'){Notification.requestPermission();}
+alarm.preload='auto';alarm.load();
 </script>
 </body>
 </html>
